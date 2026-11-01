@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>HearClear</title>
+  <meta name="description" content="Live two-way (or more) voice translation in your browser. Talk naturally; HearClear detects who is speaking, translates, and speaks the translation aloud." />
+  <meta name="theme-color" content="#4f46e5" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%234f46e5'/%3E%3Cpath d='M18 26c0-7 6-12 14-12s14 5 14 12-6 12-14 12h-4l-8 7v-9c-1.3-2.4-2-5-2-10z' fill='white'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 64 64" width="28" height="28"><rect width="64" height="64" rx="16" fill="currentColor"/><path d="M18 26c0-7 6-12 14-12s14 5 14 12-6 12-14 12h-4l-8 7v-9c-1.3-2.4-2-5-2-10z" fill="var(--bg)"/></svg>
+      </span>
+      <span class="brand-name">HearClear</span>
+      <span class="mode-chip" id="mode-chip" title="Speech engine"></span>
+    </div>
+    <nav class="top-actions">
+      <button class="btn ghost" id="guide-btn" title="How to use HearClear">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.6 2.2c-.7.4-1.1.9-1.1 1.8v.5M12 17h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <span class="hide-sm">Guide</span>
+      </button>
+      <button class="btn ghost" id="settings-btn" title="Settings">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+        <span class="hide-sm">Settings</span>
+      </button>
+    </nav>
+  </header>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <main class="stage">
+    <section class="people" id="people" aria-label="People in the conversation"></section>
+    <button class="add-person" id="add-person" type="button">
+      <span class="plus" aria-hidden="true">+</span> Add person
+    </button>
+  </main>
+
+  <footer class="controls">
+    <div class="status-wrap">
+      <div class="status" id="status" role="status" aria-live="polite">Tap 🎙️ Talk on your card, speak, then tap it again to save.</div>
+      <div class="progress" id="progress" hidden><span id="progress-fill"></span></div>
+    </div>
+    <div class="side-actions">
+      <button class="btn ghost small" id="skip-btn" hidden title="Stop the voice that is playing">Stop voice</button>
+      <button class="btn ghost small" id="export-btn" title="Download transcript">Save transcript</button>
+      <button class="btn ghost small" id="clear-btn" title="Clear conversation">Clear</button>
+    </div>
+  </footer>
+
+  <!-- Settings -->
+  <dialog class="sheet" id="settings-dialog" aria-labelledby="settings-title">
+    <form method="dialog" class="sheet-body" id="settings-form">
+      <div class="sheet-head">
+        <h2 id="settings-title">Settings</h2>
+        <button class="icon-btn" value="close" aria-label="Close">✕</button>
+      </div>
+
+      <fieldset>
+        <legend>Speech recognition</legend>
+        <label class="radio-card">
+          <input type="radio" name="engine" value="whisper" />
+          <span>
+            <strong>On-device AI (Whisper)</strong><br />
+            <small>Works in every modern browser and keeps your voice on this device. The model loads automatically when the page opens: about 80&nbsp;MB the first time, then it's saved.</small>
+          </span>
+        </label>
+        <label class="radio-card">
+          <input type="radio" name="engine" value="browser" />
+          <span>
+            <strong>Browser speech</strong><br />
+            <small>Uses your browser's speech recognition (Chrome, Edge, Safari). The fastest live words and nothing to download, but your audio goes to the browser maker's service.</small>
+          </span>
+        </label>
+        <label class="row" data-for="whisper">
+          <span>Whisper model</span>
+          <select name="model">
+            <option value="onnx-community/whisper-tiny">Tiny: fastest, ~40 MB</option>
+            <option value="onnx-community/whisper-base">Base: balanced, ~80 MB</option>
+            <option value="onnx-community/whisper-small">Small: most accurate, ~250 MB (needs a fast device)</option>
+          </select>
+        </label>
+        <label class="row" data-for="whisper">
+          <span>Run the model on</span>
+          <select name="device">
+            <option value="auto">Automatic (graphics card on computers, CPU on phones)</option>
+            <option value="webgpu">Graphics card (WebGPU): fastest, uses more memory</option>
+            <option value="wasm">CPU: uses the least memory</option>
+          </select>
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Translation &amp; voice</legend>
+        <label class="row">
+          <span>Translation service</span>
+          <select name="translator">
+            <option value="auto">Automatic (best available)</option>
+            <option value="google">Google Translate (free web)</option>
+            <option value="mymemory">MyMemory</option>
+            <option value="builtin">Built-in browser translator (Chrome, on-device)</option>
+          </select>
+        </label>
+        <label class="row check">
+          <input type="checkbox" name="autoSpeak" />
+          <span>Play the translation automatically after saving</span>
+        </label>
+        <label class="row">
+          <span>Voice speed <output id="rate-out"></output></span>
+          <input type="range" name="rate" min="0.6" max="1.6" step="0.1" />
+        </label>
+      </fieldset>
+
+      <div class="sheet-foot">
+        <span></span>
+        <button class="btn primary" value="close">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Wizard -->
+  <div class="wizard-backdrop" id="wizard" hidden>
+    <div class="spotlight" id="spotlight"></div>
+    <div class="wizard-card" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
+      <div class="wizard-step" id="wizard-step"></div>
+      <h2 id="wizard-title"></h2>
+      <div class="wizard-body" id="wizard-body"></div>
+      <div class="wizard-dots" id="wizard-dots"></div>
+      <div class="wizard-foot">
+        <button type="button" class="btn ghost" id="wizard-skip">Skip tour</button>
+        <span class="grow"></span>
+        <button type="button" class="btn ghost" id="wizard-back">Back</button>
+        <button type="button" class="btn primary" id="wizard-next">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <template id="person-tpl">
+    <article class="person">
+      <header class="person-head">
+        <span class="avatar"></span>
+        <input class="name" aria-label="Name" maxlength="24" />
+        <button class="icon-btn remove" title="Remove person" aria-label="Remove person">✕</button>
+      </header>
+      <div class="person-config">
+        <label class="mini">
+          <span>Speaks</span>
+          <select class="lang"></select>
+        </label>
+        <label class="mini">
+          <span>AI voice</span>
+          <select class="voice">
+            <option value="auto">Auto (match my voice)</option>
+            <option value="female">Female</option>
+            <option value="male">Male</option>
+          </select>
+        </label>
+      </div>
+      <div class="boxes">
+        <section class="box orig-box" aria-label="Original">
+          <header class="box-head"><span class="box-title">🎙️ Original</span><span class="box-lang"></span></header>
+          <div class="box-list" aria-live="polite"><div class="live" dir="auto" hidden></div></div>
+        </section>
+        <section class="box tr-box" aria-label="Translation">
+          <header class="box-head"><span class="box-title">🌐 Translation</span><span class="box-lang"></span></header>
+          <div class="box-list" aria-live="polite"><div class="live" dir="auto" hidden></div></div>
+        </section>
+      </div>
+      <div class="talk-row">
+        <button class="talk-btn" type="button" aria-pressed="false">
+          <span class="talk-icon" aria-hidden="true"></span>
+          <span class="talk-label">Talk</span>
+          <span class="talk-time"></span>
+        </button>
+        <span class="voice-info"></span>
+      </div>
+    </article>
+  </template>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
