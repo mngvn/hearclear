@@ -33,6 +33,7 @@ export class WhisperEngine {
         const m = e.data;
         if (m.type === 'progress') this.cb.onProgress?.(m.data);
         else if (m.type === 'ready') { this.ready = true; this.device = m.device; this.cb.onReady?.(m); resolve(); }
+        else if (m.type === 'token') this.pending.get(m.id)?.onText?.(m.text);
         else if (m.type === 'result') { this.pending.get(m.id)?.resolve(m); this.pending.delete(m.id); }
         else if (m.type === 'error') {
           if (m.id != null && this.pending.has(m.id)) { this.pending.get(m.id).reject(new Error(m.message)); this.pending.delete(m.id); }
@@ -50,12 +51,24 @@ export class WhisperEngine {
     return this.loading;
   }
 
-  /** @returns {Promise<{text:string, language:string, probs:object, ms:number}>} */
-  transcribe(audio, languages) {
+  /**
+   * Full transcription of a finished sentence. `onText` receives words as they are decoded.
+   * @returns {Promise<{text:string, language:string, probs:object, ms:number}>}
+   */
+  transcribe(audio, languages, { onText } = {}) {
+    return this._send('transcribe', audio, languages, onText);
+  }
+
+  /** Quick preview of a sentence that is still being spoken. */
+  partial(audio, languages) {
+    return this._send('partial', audio, languages);
+  }
+
+  _send(type, audio, languages, onText) {
     const id = ++this.seq;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.worker.postMessage({ type: 'transcribe', id, audio, languages }, [audio.buffer]);
+      this.pending.set(id, { resolve, reject, onText });
+      this.worker.postMessage({ type, id, audio, languages }, [audio.buffer]);
     });
   }
 }

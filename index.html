@@ -117,6 +117,10 @@
           </select>
         </label>
         <label class="row check">
+          <input type="checkbox" name="livePreview" />
+          <span>Show words live while someone is speaking</span>
+        </label>
+        <label class="row check">
           <input type="checkbox" name="autoSpeak" />
           <span>Read translations aloud with an AI voice</span>
         </label>
@@ -206,8 +210,16 @@
         <button class="chip enroll" type="button" title="Record a short sample so HearClear recognises this voice">Teach voice</button>
         <span class="voice-info"></span>
       </div>
-      <div class="messages" aria-live="polite"></div>
-      <div class="live"></div>
+      <div class="boxes">
+        <section class="box orig-box" aria-label="Original">
+          <header class="box-head"><span class="box-title">🎙️ Original</span><span class="box-lang"></span></header>
+          <div class="box-list" aria-live="polite"><div class="live" dir="auto" hidden></div></div>
+        </section>
+        <section class="box tr-box" aria-label="Translation">
+          <header class="box-head"><span class="box-title">🌐 Translation</span><span class="box-lang"></span></header>
+          <div class="box-list" aria-live="polite"><div class="live" dir="auto" hidden></div></div>
+        </section>
+      </div>
     </article>
   </template>
 

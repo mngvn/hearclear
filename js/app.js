@@ -27,6 +27,7 @@ const DEFAULT_SETTINGS = {
   autoTurn: true,
   translator: 'auto',
   autoSpeak: true,
+  livePreview: true,
   rate: 1,
   headphones: false,
   pauseMs: 800,
@@ -185,7 +186,7 @@ function renderPeople() {
     lang.addEventListener('change', () => {
       p.lang = lang.value;
       save();
-      renderPersonMessages(p.id);
+      state.people.forEach((q) => renderPersonMessages(q.id));
       if (state.running && state.settings.engine === 'browser' && state.turnId === p.id) browser?.setLang(p.lang);
       updateStatusListening();
     });
@@ -269,12 +270,11 @@ function removePerson(id) {
 // ---------------------------------------------------------------------------
 // Messages
 // ---------------------------------------------------------------------------
-function targetLangs(msg) {
-  const src = getLang(msg.lang).tr;
-  const seen = new Set([src]);
+function targetLangsFor(personId, srcLang) {
+  const seen = new Set([getLang(srcLang).tr]);
   const out = [];
   for (const p of state.people) {
-    if (p.id === msg.personId) continue;
+    if (p.id === personId) continue;
     const tr = getLang(p.lang).tr;
     if (seen.has(tr)) continue;
     seen.add(tr);
@@ -282,62 +282,180 @@ function targetLangs(msg) {
   }
   return out;
 }
+const targetLangs = (msg) => targetLangsFor(msg.personId, msg.lang);
 
-function renderPersonMessages(personId) {
+/** The two boxes of a person's card: { orig: {list, live}, tr: {list, live} } */
+function boxes(personId) {
   const c = card(personId);
-  if (!c) return;
-  const box = $('.messages', c);
-  const msgs = state.messages.filter((m) => m.personId === personId);
-  box.innerHTML = '';
-  if (!msgs.length) {
-    const p = person(personId);
-    box.innerHTML = `<div class="empty">What ${escapeHtml(p.name)} says in ${escapeHtml(getLang(p.lang).name)} will appear here, with the translation underneath.</div>`;
-    return;
-  }
-  msgs.forEach((m) => box.appendChild(messageNode(m)));
-  box.scrollTop = box.scrollHeight;
+  if (!c) return null;
+  const get = (cls) => ({ list: $(`.${cls} .box-list`, c), live: $(`.${cls} .live`, c), lang: $(`.${cls} .box-lang`, c) });
+  return { orig: get('orig-box'), tr: get('tr-box') };
 }
 
-function messageNode(m) {
-  const div = document.createElement('div');
-  div.className = 'msg';
-  div.dataset.id = m.id;
+function updateBoxHeaders(personId) {
+  const b = boxes(personId);
+  const p = person(personId);
+  if (!b || !p) return;
+  b.orig.lang.textContent = getLang(p.lang).name;
+  const targets = targetLangsFor(p.id, p.lang).map((c) => getLang(c).name);
+  b.tr.lang.textContent = targets.length ? targets.join(' · ') : 'same language as everyone';
+}
+
+const nearBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+function scrollDown(...els) { for (const el of els) el.scrollTop = el.scrollHeight; }
+
+function renderPersonMessages(personId) {
+  const b = boxes(personId);
+  if (!b) return;
+  updateBoxHeaders(personId);
+  const p = person(personId);
+  const msgs = state.messages.filter((m) => m.personId === personId);
+  b.orig.list.querySelectorAll('.msg, .empty').forEach((n) => n.remove());
+  b.tr.list.querySelectorAll('.msg, .empty').forEach((n) => n.remove());
+  if (!msgs.length) {
+    b.orig.live.insertAdjacentHTML('beforebegin', `<div class="empty">What ${escapeHtml(p.name)} says in ${escapeHtml(getLang(p.lang).name)} appears here, word by word.</div>`);
+    b.tr.live.insertAdjacentHTML('beforebegin', '<div class="empty">The translation appears here.</div>');
+    return;
+  }
+  for (const m of msgs) {
+    const { orig, tr } = messageNodes(m);
+    b.orig.live.before(orig);
+    b.tr.live.before(tr);
+  }
+  scrollDown(b.orig.list, b.tr.list);
+}
+
+function messageNodes(m) {
   const src = getLang(m.lang);
   const time = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  let html = `<button class="icon-btn menu-btn" aria-label="Message options" title="Options">⋯</button>
-    <div class="orig" dir="auto" lang="${src.code}">${escapeHtml(m.text)}</div>
-    <div class="meta">${time} · ${escapeHtml(src.name)}${m.how ? ` · ${escapeHtml(m.how)}` : ''}</div>`;
-  for (const code of Object.keys(m.translations)) {
+
+  const orig = document.createElement('div');
+  orig.className = 'msg';
+  orig.dataset.id = m.id;
+  orig.innerHTML = `<button class="icon-btn menu-btn" aria-label="Message options" title="Options">⋯</button>
+    <div class="text" dir="auto" lang="${src.code}">${escapeHtml(m.text)}</div>
+    <div class="meta">${time}${m.how ? ` · ${escapeHtml(m.how)}` : ''}</div>`;
+  $('.menu-btn', orig).addEventListener('click', (e) => { e.stopPropagation(); openMessageMenu(m, orig); });
+
+  const tr = document.createElement('div');
+  tr.className = 'msg';
+  tr.dataset.id = m.id;
+  const codes = Object.keys(m.translations);
+  const multi = codes.length > 1;
+  if (!codes.length) tr.innerHTML = '<div class="text muted">(no translation needed)</div>';
+  for (const code of codes) {
     const t = m.translations[code];
     const L = getLang(code);
-    const text = t.status === 'done' ? escapeHtml(t.text) : t.status === 'error' ? `Couldn't translate: ${escapeHtml(t.error)}` : 'Translating…';
-    html += `<div class="tr ${t.status}" data-lang="${code}">
-      <div><div class="tl">${escapeHtml(L.name)}</div><div class="tt" dir="auto" lang="${L.code}">${text}</div></div>
+    const body = t.status === 'done' ? escapeHtml(t.text)
+      : t.status === 'error' ? `Couldn't translate: ${escapeHtml(t.error)}`
+      : t.text ? `${escapeHtml(t.text)}…` : 'Translating…';
+    tr.insertAdjacentHTML('beforeend', `<div class="tr-line ${t.status}">
+      <div class="grow">${multi ? `<div class="tl">${escapeHtml(L.name)}</div>` : ''}<div class="text" dir="auto" lang="${L.code}">${body}</div></div>
       ${t.status === 'done' && ttsSupported() ? `<button class="icon-btn play" data-lang="${code}" aria-label="Play ${escapeHtml(L.name)} translation" title="Play">🔊</button>` : ''}
-    </div>`;
+    </div>`);
   }
-  div.innerHTML = html;
-  $('.menu-btn', div).addEventListener('click', (e) => { e.stopPropagation(); openMessageMenu(m, div); });
-  div.querySelectorAll('.play').forEach((b) => b.addEventListener('click', () => {
-    const t = m.translations[b.dataset.lang];
+  tr.querySelectorAll('.play').forEach((btn) => btn.addEventListener('click', () => {
+    const t = m.translations[btn.dataset.lang];
     const p = person(m.personId);
-    if (t?.text) queueSpeech([{ text: t.text, lang: b.dataset.lang, gender: p ? effectiveGender(p) : null }]);
+    if (t?.text) queueSpeech([{ text: t.text, lang: btn.dataset.lang, gender: p ? effectiveGender(p) : null }]);
   }));
-  return div;
+
+  // Hovering one half highlights the other.
+  const pair = (on) => { orig.classList.toggle('paired', on); tr.classList.toggle('paired', on); };
+  for (const n of [orig, tr]) { n.addEventListener('mouseenter', () => pair(true)); n.addEventListener('mouseleave', () => pair(false)); }
+  return { orig, tr };
 }
 
 function rerenderMessage(m) {
-  const c = card(m.personId);
-  if (!c) return;
-  const box = $('.messages', c);
-  const old = box.querySelector(`.msg[data-id="${m.id}"]`);
-  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
-  if (old) old.replaceWith(messageNode(m));
-  else {
-    box.querySelector('.empty')?.remove();
-    box.appendChild(messageNode(m));
+  const b = boxes(m.personId);
+  if (!b) return;
+  const stick = nearBottom(b.orig.list) || nearBottom(b.tr.list);
+  const { orig, tr } = messageNodes(m);
+  const oldO = b.orig.list.querySelector(`.msg[data-id="${m.id}"]`);
+  const oldT = b.tr.list.querySelector(`.msg[data-id="${m.id}"]`);
+  b.orig.list.querySelector('.empty')?.remove();
+  b.tr.list.querySelector('.empty')?.remove();
+  oldO ? oldO.replaceWith(orig) : b.orig.live.before(orig);
+  oldT ? oldT.replaceWith(tr) : b.tr.live.before(tr);
+  if (stick || !oldO) scrollDown(b.orig.list, b.tr.list);
+}
+
+// ---------------------------------------------------------------------------
+// Live (in-progress) text: words appear while someone is still talking
+// ---------------------------------------------------------------------------
+let live = null; // { key, personId, lang, text, tr: {code: text} }
+
+function showLive(personId, text, lang, key) {
+  if (live && live.personId !== personId) clearLiveDom(live.personId);
+  if (!live || live.key !== key) live = { key, personId, lang, text: '', tr: {} };
+  live.personId = personId;
+  live.lang = lang;
+  live.text = text;
+  const b = boxes(personId);
+  if (!b) return;
+  b.orig.live.textContent = text;
+  b.orig.live.hidden = !text;
+  b.orig.list.querySelector('.empty')?.remove();
+  renderLiveTr();
+  card(personId)?.classList.add('speaking');
+  scrollDown(b.orig.list, b.tr.list);
+  if (text) liveTranslate();
+}
+
+function renderLiveTr() {
+  if (!live) return;
+  const b = boxes(live.personId);
+  if (!b) return;
+  const entries = Object.entries(live.tr);
+  b.tr.live.innerHTML = entries.map(([code, t]) =>
+    `${entries.length > 1 ? `<span class="tl">${escapeHtml(getLang(code).name)}</span> ` : ''}${escapeHtml(t)}`).join('<br>');
+  b.tr.live.hidden = !entries.length;
+  b.tr.list.querySelector('.empty')?.remove();
+  scrollDown(b.tr.list);
+}
+
+function clearLiveDom(personId) {
+  const b = boxes(personId);
+  if (!b) return;
+  for (const x of [b.orig.live, b.tr.live]) { x.textContent = ''; x.hidden = true; }
+  card(personId)?.classList.remove('speaking');
+}
+
+/** Clears the live preview; returns its last translations so the final message can show them right away. */
+function takeLive(key) {
+  if (!live || (key !== undefined && live.key !== key)) return null;
+  const done = live;
+  live = null;
+  clearLiveDom(done.personId);
+  if (!state.messages.some((m) => m.personId === done.personId)) renderPersonMessages(done.personId);
+  return done;
+}
+
+function clearAllLive() {
+  live = null;
+  state.people.forEach((p) => clearLiveDom(p.id));
+}
+
+// Live translation: at most one request in flight, always for the newest text.
+let liveTrBusy = false;
+async function liveTranslate() {
+  if (liveTrBusy || !live || !state.settings.livePreview) return;
+  const job = { ...live };
+  const targets = targetLangsFor(job.personId, job.lang);
+  if (!targets.length) return;
+  liveTrBusy = true;
+  try {
+    const results = await Promise.all(targets.map((t) =>
+      translate(job.text, job.lang, t, state.settings.translator, { live: true }).then((r) => [t, r.text], () => null)));
+    if (live && live.key === job.key && live.personId === job.personId) {
+      for (const r of results) if (r) live.tr[r[0]] = r[1];
+      renderLiveTr();
+    }
+  } finally {
+    await new Promise((r) => setTimeout(r, 350));
+    liveTrBusy = false;
+    if (live && live.text !== job.text) liveTranslate();
   }
-  if (atBottom || !old) box.scrollTop = box.scrollHeight;
 }
 
 let openMenu = null;
@@ -385,7 +503,7 @@ function moveMessage(m, toId) {
   save();
 }
 
-async function addMessage(p, text, lang, print, how) {
+async function addMessage(p, text, lang, print, how, seed = null) {
   if (print) {
     updateProfile(p, print);
     updateVoiceInfo(p);
@@ -394,16 +512,16 @@ async function addMessage(p, text, lang, print, how) {
   const m = { id: newId(), personId: p.id, text, lang, ts: Date.now(), translations: {}, print, how };
   state.messages.push(m);
   save();
-  rerenderMessage(m);
   flash(p.id);
-  await translateMessage(m);
+  await translateMessage(m, seed?.personId === p.id ? seed.tr : null);
   if (state.settings.autoSpeak) speakMessage(m);
 }
 
-async function translateMessage(m) {
+async function translateMessage(m, seed = null) {
   const targets = targetLangs(m);
   m.translations = {};
-  targets.forEach((t) => (m.translations[t] = { status: 'pending' }));
+  // Show the live translation (if any) until the final one arrives.
+  targets.forEach((t) => (m.translations[t] = { status: 'pending', text: seed?.[t] }));
   rerenderMessage(m);
   await Promise.all(targets.map(async (t) => {
     try {
@@ -491,6 +609,7 @@ let browser = null;
 let acceptingAudio = false;
 let utteranceChain = Promise.resolve();
 let lastFinalAt = 0;
+let browserSeq = 0;
 let levelRaf = 0;
 let pendingLevel = 0;
 
@@ -503,11 +622,16 @@ function createMic() {
     },
     onSpeechChange: (speaking) => {
       if (!state.running || !acceptingAudio || state.settings.engine !== 'whisper') return;
-      if (speaking) setStatus('Hearing someone', { dots: true });
+      clearInterval(partialTimer);
+      if (speaking) {
+        setStatus('Hearing someone', { dots: true });
+        partialTimer = setInterval(maybePartial, 200);
+      }
     },
     onSegment: (seg) => {
       if (!state.running || !acceptingAudio || state.settings.engine !== 'whisper') return;
       const print = voiceprint(seg.samples);
+      pendingSegments++;
       utteranceChain = utteranceChain.then(() => processWhisperSegment(seg, print)).catch((err) => {
         console.error(err);
         showBanner(`Speech recognition error: ${escapeHtml(err.message)}`, { error: true, timeout: 8000 });
@@ -524,32 +648,79 @@ const HALLUCINATIONS = [
 ];
 const isHallucination = (text) => HALLUCINATIONS.some((r) => r.test(text.trim()));
 
-let pendingSegments = 0;
-async function processWhisperSegment(seg, print) {
-  if (!state.running) return;
-  pendingSegments++;
-  setStatus('Transcribing', { dots: true });
-  try {
-    const forced = person(state.turnId);
-    const langs = forced ? [whisperCode(forced)] : [...new Set(state.people.map(whisperCode))];
-    const res = await whisper.transcribe(seg.samples, langs);
-    const text = res.text.replace(/\s+/g, ' ').trim();
-    if (!text || isHallucination(text)) return;
+let pendingSegments = 0; // sentences waiting for (or in) final transcription
 
-    let candidates;
-    let how;
-    if (forced) {
-      candidates = [forced];
-      how = 'set by “My turn”';
-    } else {
-      candidates = state.people.filter((p) => whisperCode(p) === res.language);
-      if (!candidates.length) candidates = state.people;
-      how = candidates.length === 1 ? 'detected by language' : 'detected by voice';
-    }
-    const p = identifySpeaker(candidates, print);
+/** Who said it, given the detected language and voice. */
+function pickSpeaker(language, print) {
+  const forced = person(state.turnId);
+  if (forced) return { p: forced, how: 'set by “My turn”' };
+  let candidates = state.people.filter((p) => whisperCode(p) === language);
+  if (!candidates.length) candidates = state.people;
+  return {
+    p: identifySpeaker(candidates, print),
+    how: candidates.length === 1 ? 'detected by language' : 'detected by voice',
+  };
+}
+
+const whisperLanguages = () => {
+  const forced = person(state.turnId);
+  return forced ? [whisperCode(forced)] : [...new Set(state.people.map(whisperCode))];
+};
+
+// --- Live previews while someone is still talking (Whisper mode) ---
+let partialTimer = 0;
+let partialBusy = false;
+let lastPartialAt = 0;
+let lastInferMs = 800;
+
+function maybePartial() {
+  if (!state.settings.livePreview || !state.running || !acceptingAudio || !mic?.inSpeech || !whisper?.ready) return;
+  if (partialBusy || pendingSegments > 0) return; // finished sentences come first
+  if (lastInferMs > 5000) return; // device too slow for live previews
+  const now = performance.now();
+  if (now - lastPartialAt < Math.max(700, lastInferMs * 1.25)) return;
+  const audio = mic.currentSegment();
+  if (!audio || audio.length < 16000 * 0.7) return;
+  const seq = mic.segSeq;
+  partialBusy = true;
+  lastPartialAt = now;
+  const print = voiceprint(audio);
+  whisper.partial(audio, whisperLanguages())
+    .then((res) => {
+      lastInferMs = res.ms;
+      const text = res.text.replace(/\s+/g, ' ').trim();
+      // Ignore if the sentence already finished and was transcribed.
+      if (!text || isHallucination(text) || !state.running || seq !== mic?.segSeq || !mic?.inSpeech && pendingSegments === 0) return;
+      const { p } = pickSpeaker(res.language, print);
+      if (p) showLive(p.id, text, p.lang, `w${seq}`);
+    })
+    .catch(() => {})
+    .finally(() => { partialBusy = false; });
+}
+
+async function processWhisperSegment(seg, print) {
+  try {
+    if (!state.running) return;
+    setStatus('Transcribing', { dots: true });
+    // Stream the words into the live box of whoever the preview thought was talking.
+    const key = `w${seg.seq}`;
+    let streamed = '';
+    const res = await whisper.transcribe(seg.samples, whisperLanguages(), {
+      onText: (t) => {
+        streamed += t;
+        const text = streamed.replace(/\s+/g, ' ').trim();
+        if (!text) return;
+        if (live?.key === key) showLive(live.personId, text, live.lang, key);
+        else setStatus(`Hearing: “${text}”`);
+      },
+    });
+    const text = res.text.replace(/\s+/g, ' ').trim();
+    const preview = takeLive(key);
+    if (!text || isHallucination(text)) return;
+    const { p, how } = pickSpeaker(res.language, print);
     if (!p) return;
     // Use the person's own language code (e.g. es-MX) for translation/display.
-    addMessage(p, text, p.lang, print, how);
+    addMessage(p, text, p.lang, print, how, preview);
   } finally {
     pendingSegments--;
     if (!pendingSegments && !speechPending) updateStatusListening();
@@ -573,7 +744,7 @@ function setTurn(id) {
   state.turnId = id;
   updateTurnUI();
   if (state.settings.engine === 'browser' && browser && state.running) {
-    for (const p of state.people) { const c = card(p.id); if (c) $('.live', c).textContent = ''; }
+    clearAllLive();
     browser.setLang(person(id).lang);
   }
   updateStatusListening();
@@ -601,22 +772,23 @@ function nextTurnAfter(id, lang) {
 
 function createBrowserEngine() {
   return new BrowserSpeechEngine({
-    onInterim: (text) => {
-      const c = card(state.turnId);
-      if (c) $('.live', c).textContent = text ? `${text}…` : '';
+    onInterim: (text, lang) => {
+      const turn = person(state.turnId);
+      if (!turn || !state.settings.livePreview) return;
+      if (text) showLive(turn.id, text, lang, `b${browserSeq}`);
     },
     onFinal: (text, lang) => {
       const turn = person(state.turnId);
       if (!turn) return;
-      const c = card(turn.id);
-      if (c) $('.live', c).textContent = '';
+      const preview = takeLive(`b${browserSeq}`);
+      browserSeq++;
       const now = performance.now();
       const audio = mic?.running ? mic.collectSpeechSince(lastFinalAt) : null;
       lastFinalAt = now;
       const print = audio && audio.length > 8000 ? voiceprint(audio) : null;
       const candidates = state.people.filter((p) => p.lang === lang);
       const p = identifySpeaker(candidates.length ? candidates : [turn], print, turn.id) || turn;
-      addMessage(p, text, lang, print, candidates.length > 1 ? 'detected by voice' : null);
+      addMessage(p, text, lang, print, candidates.length > 1 ? 'detected by voice' : null, preview);
       if (state.settings.autoTurn && state.people.length > 1) setTurn(nextTurnAfter(p.id, lang).id);
     },
     onError: (err) => {
@@ -791,7 +963,8 @@ function stopConversation() {
   browser = null;
   mic?.stop();
   mic = null;
-  for (const p of state.people) { const c = card(p.id); if (c) $('.live', c).textContent = ''; }
+  clearInterval(partialTimer);
+  clearAllLive();
   els.mic.setAttribute('aria-pressed', 'false');
   els.mic.setAttribute('aria-label', 'Start conversation');
   els.meter.style.width = '0';
@@ -890,6 +1063,7 @@ function syncSettingsForm() {
   form.autoTurn.checked = s.autoTurn;
   form.translator.value = s.translator;
   form.autoSpeak.checked = s.autoSpeak;
+  form.livePreview.checked = s.livePreview;
   form.rate.value = s.rate;
   form.headphones.checked = s.headphones;
   form.pauseMs.value = s.pauseMs;
@@ -918,6 +1092,7 @@ form.addEventListener('input', () => {
   s.autoTurn = form.autoTurn.checked;
   s.translator = form.translator.value;
   s.autoSpeak = form.autoSpeak.checked;
+  s.livePreview = form.livePreview.checked;
   s.rate = Number(form.rate.value);
   s.headphones = form.headphones.checked;
   s.pauseMs = Number(form.pauseMs.value);
@@ -996,9 +1171,9 @@ const wizard = createWizard([
   },
   {
     target: '.person',
-    title: 'One box per person',
-    html: `<p>Each person gets their own box. Tap the name to rename it, then pick the language they <strong>speak</strong> under <strong>Speaks</strong>.</p>
-      <p>What they say shows up here, with the translation underneath.</p>`,
+    title: 'A card for each person',
+    html: `<p>Each person gets their own card. Tap the name to rename it, then pick the language they <strong>speak</strong> under <strong>Speaks</strong>.</p>
+      <p>The card has two boxes. <strong>Original</strong> shows their words live as they talk. <strong>Translation</strong> shows the same sentence in the other person's language.</p>`,
   },
   {
     target: '#add-person',
@@ -1058,7 +1233,7 @@ navigator.storage?.persist?.().catch(() => {}); // keep the cached model from be
 // A normal refresh/close while loading is not a crash.
 window.addEventListener('pagehide', () => { if (modelLoading) storageRemove(LOAD_FLAG); });
 // Finish translations that were in flight when the page was closed.
-state.messages.filter((m) => targetLangs(m).some((t) => !m.translations[t])).forEach((m) => translateMessage(m));
+state.messages.filter((m) => targetLangs(m).some((t) => m.translations[t]?.status !== 'done')).forEach((m) => translateMessage(m));
 if (state.settings.engine === 'whisper') {
   if (checkCrashGuard()) ensureWhisper().catch(showModelError);
 } else {

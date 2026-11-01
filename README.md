@@ -7,8 +7,8 @@ Live voice translation for face-to-face conversations between people who speak d
 ## What it does
 
 1. Press the microphone and talk. HearClear starts with **two people** and you can **add up to eight**.
-2. It hears each sentence and works out **who is speaking**, then shows the words in **that person's box**.
-3. It **translates** the sentence into every other person's language and shows it underneath.
+2. Each person's card has two boxes. **Original** shows their words **live, as they speak**. **Translation** shows the same sentence in the other person's language, also updating live.
+3. It works out **who is speaking** and puts the words in **that person's** card.
 4. It **reads the translation aloud** with an AI voice of the **same gender** as the speaker. The gender is detected from the pitch of the speaker's voice, or you can set it yourself.
 
 A guided tour opens on the first visit. Reopen it any time with **Guide** in the top bar.
@@ -17,7 +17,7 @@ A guided tour opens on the first visit. Reopen it any time with **Guide** in the
 
 | Mode | How it decides who's talking | Notes |
 | --- | --- | --- |
-| **Auto-detect speakers** (default) | Runs [Whisper](https://github.com/openai/whisper) on your device via [transformers.js](https://github.com/huggingface/transformers.js). For each sentence it detects which of the *participants'* languages is spoken, which picks the person. If several people share a language, it compares voice fingerprints (pitch and spectral features). | The model downloads once (~40–250 MB depending on size) and is cached. Uses WebGPU when available, otherwise WebAssembly. Works in Chrome, Edge, Safari and Firefox. |
+| **Auto-detect speakers** (default) | While someone talks, it re-transcribes the unfinished sentence about once a second for the live preview, then does a final pass when they pause. Runs [Whisper](https://github.com/openai/whisper) on your device via [transformers.js](https://github.com/huggingface/transformers.js). For each sentence it detects which of the *participants'* languages is spoken, which picks the person. If several people share a language, it compares voice fingerprints (pitch and spectral features). | The model downloads once (~40–250 MB depending on size) and is cached. Uses WebGPU when available, otherwise WebAssembly. Works in Chrome, Edge, Safari and Firefox. |
 | **Browser speech** (turn-taking) | Uses the browser's Web Speech API in the current person's language, then passes the turn to the next person after each sentence. Voice fingerprints decide between people who share a language. | Fast, nothing to download. Chrome, Edge and Safari only. |
 
 Fixing mistakes:

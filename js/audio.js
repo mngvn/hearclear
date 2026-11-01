@@ -29,6 +29,12 @@ export class MicCapture {
     this.preroll = [];
     this.history = []; // {t, frame} for voiced frames
     this.recorder = null; // raw recording for voice enrollment
+    this.segSeq = 0; // increments for every new sentence
+  }
+
+  /** Audio of the sentence currently being spoken (for live previews), or null. */
+  currentSegment() {
+    return this.inSpeech ? concat(this.segFrames) : null;
   }
 
   async start() {
@@ -172,6 +178,7 @@ export class MicCapture {
       this.speechRun = isSpeech ? this.speechRun + 1 : 0;
       if (this.speechRun >= 4) {
         this.inSpeech = true;
+        this.segSeq++;
         this.segFrames = this.preroll.slice();
         this.preroll = [];
         this.voicedFrames = this.speechRun;
@@ -198,7 +205,7 @@ export class MicCapture {
     // Trim most of the trailing silence, keep ~200 ms.
     const keep = Math.max(0, this.segFrames.length - Math.max(0, this.silenceRun - 7));
     const samples = concat(this.segFrames.slice(0, keep));
-    const seg = { samples, durationMs: samples.length / SAMPLE_RATE * 1000, peakDb: this.peakDb, startedAt: this.segStart };
+    const seg = { seq: this.segSeq, samples, durationMs: samples.length / SAMPLE_RATE * 1000, peakDb: this.peakDb, startedAt: this.segStart };
     this.opts.onSpeechChange?.(false);
     this._resetSegment();
     if (voicedMs >= 300) this.opts.onSegment(seg);

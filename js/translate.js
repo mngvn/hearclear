@@ -48,14 +48,17 @@ const PROVIDERS = { builtin: viaBuiltin, google: viaGoogle, mymemory: viaMyMemor
  * @param {string} toCode   BCP-47 code from languages.js
  * @param {'auto'|'builtin'|'google'|'mymemory'} provider
  */
-export async function translate(text, fromCode, toCode, provider = 'auto') {
+export async function translate(text, fromCode, toCode, provider = 'auto', { live = false } = {}) {
   const from = getLang(fromCode).tr;
   const to = getLang(toCode).tr;
   if (from === to) return { text, provider: 'none' };
   const key = `${provider}|${from}|${to}|${text}`;
   if (cache.has(key)) return cache.get(key);
 
-  const order = provider === 'auto' ? ['google', 'mymemory', 'builtin'] : [provider];
+  // Live previews skip MyMemory: its free daily quota is small.
+  let order = provider === 'auto' ? ['google', 'mymemory', 'builtin'] : [provider];
+  if (live) order = order.filter((p) => p !== 'mymemory');
+  if (!order.length) throw new Error('No live translation provider');
   let lastErr;
   for (const name of order) {
     try {
