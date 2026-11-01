@@ -13,10 +13,19 @@ export class WhisperEngine {
     this.seq = 0;
   }
 
+  isReady(modelId, devicePref = 'auto') {
+    return this.ready && this.key === `${modelId}|${devicePref}`;
+  }
+
   load(modelId, devicePref = 'auto') {
-    if (this.ready && this.modelId === modelId) return Promise.resolve();
-    if (this.loading && this.modelId === modelId) return this.loading;
-    if (this.worker && this.modelId !== modelId) { this.worker.terminate(); this.worker = null; this.ready = false; }
+    const key = `${modelId}|${devicePref}`;
+    if (this.ready && this.key === key) return Promise.resolve();
+    if (this.loading && this.key === key) return this.loading;
+    if (this.worker) { this.worker.terminate(); this.worker = null; }
+    for (const p of this.pending.values()) p.reject(new Error('Speech model was reloaded'));
+    this.pending.clear();
+    this.ready = false;
+    this.key = key;
     this.modelId = modelId;
     this.worker = new Worker(new URL('./whisper-worker.js', import.meta.url), { type: 'module' });
     this.loading = new Promise((resolve, reject) => {

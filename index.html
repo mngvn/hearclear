@@ -73,7 +73,7 @@
           <input type="radio" name="engine" value="whisper" />
           <span>
             <strong>Auto-detect speakers</strong> <em class="tag">recommended</em><br />
-            <small>Runs Whisper AI on your device. Works out which language is being spoken, and who is speaking, by itself. The model downloads once (about 80&nbsp;MB) and works in any modern browser.</small>
+            <small>Runs Whisper AI on your device. Works out which language is being spoken, and who is speaking, by itself. The model loads automatically when the page opens. It downloads once (about 80&nbsp;MB), is saved on your device, and works in any modern browser.</small>
           </span>
         </label>
         <label class="radio-card">
@@ -89,6 +89,14 @@
             <option value="onnx-community/whisper-tiny">Tiny: fastest, ~40 MB</option>
             <option value="onnx-community/whisper-base">Base: balanced, ~80 MB</option>
             <option value="onnx-community/whisper-small">Small: most accurate, ~250 MB (needs a fast device)</option>
+          </select>
+        </label>
+        <label class="row" data-for="whisper">
+          <span>Run the model on</span>
+          <select name="device">
+            <option value="auto">Automatic (graphics card on computers, CPU on phones)</option>
+            <option value="webgpu">Graphics card (WebGPU): fastest, uses more memory</option>
+            <option value="wasm">CPU: uses the least memory</option>
           </select>
         </label>
         <label class="row check" data-for="browser">

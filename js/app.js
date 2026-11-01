@@ -9,6 +9,11 @@ import { createWizard } from './wizard.js';
 const $ = (s, el = document) => el.querySelector(s);
 const STORE_KEY = 'hearclear:v1';
 const TOUR_KEY = 'hearclear:toured';
+const LOAD_FLAG = 'hearclear:model-loading'; // set while the model loads; left behind if the tab crashes
+const MAX_SAVED_MESSAGES = 300;
+const TINY_MODEL = 'onnx-community/whisper-tiny';
+const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const COLORS = ['#4f46e5', '#0891b2', '#d97706', '#db2777', '#059669', '#7c3aed', '#dc2626', '#2563eb'];
 const MAX_PEOPLE = 8;
 
@@ -18,6 +23,7 @@ const MAX_PEOPLE = 8;
 const DEFAULT_SETTINGS = {
   engine: 'whisper',
   model: 'onnx-community/whisper-base',
+  device: 'auto', // auto | webgpu | wasm
   autoTurn: true,
   translator: 'auto',
   autoSpeak: true,
@@ -41,10 +47,23 @@ const newId = () => (uid++).toString(36);
 
 function storageGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
 function storageSet(key, val) { try { localStorage.setItem(key, val); } catch {} }
+function storageRemove(key) { try { localStorage.removeItem(key); } catch {} }
 
+let saveTimer = 0;
 function save() {
-  storageSet(STORE_KEY, JSON.stringify({ people: state.people, settings: state.settings }));
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveNow, 150);
 }
+function saveNow() {
+  clearTimeout(saveTimer);
+  const messages = state.messages.slice(-MAX_SAVED_MESSAGES).map((m) => ({
+    ...m,
+    // Don't persist half-finished translations; they are redone on load.
+    translations: Object.fromEntries(Object.entries(m.translations).filter(([, t]) => t.status === 'done')),
+  }));
+  storageSet(STORE_KEY, JSON.stringify({ people: state.people, settings: state.settings, messages }));
+}
+window.addEventListener('pagehide', saveNow);
 
 function defaultLangFor(index, taken) {
   if (index === 0) {
@@ -76,6 +95,10 @@ function load() {
     const raw = JSON.parse(storageGet(STORE_KEY) || 'null');
     if (raw?.settings) state.settings = { ...DEFAULT_SETTINGS, ...raw.settings };
     if (Array.isArray(raw?.people) && raw.people.length >= 2) state.people = raw.people;
+    if (Array.isArray(raw?.messages)) {
+      const ids = new Set(state.people.map((p) => p.id));
+      state.messages = raw.messages.filter((m) => ids.has(m.personId) && m.text);
+    }
   } catch {}
   if (state.people.length < 2) {
     state.people = [];
@@ -133,7 +156,7 @@ function updateModeChip() {
   const s = state.settings;
   const size = s.model.split('-').pop();
   els.modeChip.textContent = s.engine === 'whisper'
-    ? `Auto-detect speakers · Whisper ${size}${whisper?.device === 'webgpu' ? ' · GPU' : ''}`
+    ? `Auto-detect speakers · Whisper ${size}${whisper?.ready ? (whisper.device === 'webgpu' ? ' · GPU' : ' · CPU') : ''}`
     : `Browser speech · ${s.autoTurn ? 'turn-taking' : 'manual turns'}`;
 }
 
@@ -339,6 +362,7 @@ function openMessageMenu(m, node) {
     else if (b.dataset.act === 'speak') speakMessage(m);
     else if (b.dataset.act === 'delete') {
       state.messages = state.messages.filter((x) => x !== m);
+      save();
       renderPersonMessages(m.personId);
     }
   });
@@ -369,6 +393,7 @@ async function addMessage(p, text, lang, print, how) {
   }
   const m = { id: newId(), personId: p.id, text, lang, ts: Date.now(), translations: {}, print, how };
   state.messages.push(m);
+  save();
   rerenderMessage(m);
   flash(p.id);
   await translateMessage(m);
@@ -389,6 +414,7 @@ async function translateMessage(m) {
     }
     rerenderMessage(m);
   }));
+  save();
 }
 
 function speakMessage(m) {
@@ -607,19 +633,86 @@ function createBrowserEngine() {
   });
 }
 
-function onWhisperProgress() {
-  const files = new Map();
-  return (p) => {
-    if (p.status === 'progress' && p.total) {
-      files.set(p.file, { loaded: p.loaded, total: p.total });
-      let loaded = 0, total = 0;
-      for (const f of files.values()) { loaded += f.loaded; total += f.total; }
-      const pct = Math.round((loaded / total) * 100);
-      els.progress.hidden = false;
-      els.progressFill.style.width = `${pct}%`;
-      setStatus(`Downloading speech model (first time only)… ${pct}% · ${(loaded / 1e6).toFixed(0)} of ${(total / 1e6).toFixed(0)} MB`);
-    }
-  };
+// ---------------------------------------------------------------------------
+// Speech model: loads automatically, with a guard against crash/reload loops
+// ---------------------------------------------------------------------------
+const resolveDevice = () => (state.settings.device === 'auto' ? (IS_MOBILE ? 'wasm' : 'auto') : state.settings.device);
+let modelFiles = new Map();
+let modelLoading = false;
+
+function onModelProgress(p) {
+  if (p.status !== 'progress' || !p.total) return;
+  modelFiles.set(p.file, { loaded: p.loaded, total: p.total });
+  let loaded = 0, total = 0;
+  for (const f of modelFiles.values()) { loaded += f.loaded; total += f.total; }
+  const pct = Math.round((loaded / total) * 100);
+  els.progress.hidden = false;
+  els.progressFill.style.width = `${pct}%`;
+  setStatus(`Loading speech model… ${pct}% (${(total / 1e6).toFixed(0)} MB, saved on this device after the first time)`);
+}
+
+function ensureWhisper() {
+  if (!whisper) {
+    whisper = new WhisperEngine({ onProgress: onModelProgress, onReady: () => updateModeChip(), onError: (msg) => console.error(msg) });
+  }
+  const model = state.settings.model;
+  const device = resolveDevice();
+  if (whisper.isReady(model, device)) return Promise.resolve();
+  if (!modelLoading) {
+    modelLoading = true;
+    modelFiles = new Map();
+    storageSet(LOAD_FLAG, JSON.stringify({ model, device, t: Date.now() }));
+    if (!state.running) setStatus('Loading speech model', { dots: true });
+  }
+  const p = whisper.load(model, device);
+  p.then(() => {
+    if (!whisper.isReady(model, device)) return;
+    modelLoading = false;
+    storageRemove(LOAD_FLAG);
+    els.progress.hidden = true;
+    updateModeChip();
+    if (!state.running) setStatus('Speech model ready. Press the microphone to start talking.');
+  }, () => {
+    modelLoading = false;
+    storageRemove(LOAD_FLAG);
+    els.progress.hidden = true;
+  });
+  return p;
+}
+
+function showModelError(err) {
+  const canFallback = browserSpeechSupported();
+  showBanner(`Couldn't load the on-device speech model (${escapeHtml(err?.message || err)}). <button class="btn small primary" id="retry-model">Try again</button>${canFallback ? ' <button class="btn small ghost" id="use-browser">Use browser speech instead</button>' : ''}`, { error: true });
+  setStatus('Speech model not loaded');
+  $('#retry-model')?.addEventListener('click', () => { hideBanner(); ensureWhisper().catch(showModelError); });
+  $('#use-browser')?.addEventListener('click', () => {
+    state.settings.engine = 'browser';
+    save(); syncSettingsForm(); updateModeChip(); updateTurnUI(); hideBanner();
+    state.turnId = state.people[0].id;
+    updateTurnUI();
+    setStatus('Press the microphone to start the conversation');
+  });
+}
+
+/** If the tab died while the model was loading last time, step down to something lighter. Returns false to skip auto-loading. */
+function checkCrashGuard() {
+  const raw = storageGet(LOAD_FLAG);
+  if (!raw) return true;
+  storageRemove(LOAD_FLAG);
+  let info;
+  try { info = JSON.parse(raw); } catch { return true; }
+  if (!info || Date.now() - info.t > 15 * 60 * 1000) return true;
+  const s = state.settings;
+  let change;
+  if (info.device !== 'wasm') { s.device = 'wasm'; change = 'switched to CPU mode, which uses less memory'; }
+  else if (info.model !== TINY_MODEL) { s.model = TINY_MODEL; change = 'switched to the Tiny model, which uses less memory'; }
+  if (change) {
+    saveNow();
+    showBanner(`The page reloaded while the speech model was loading. This usually means the device ran out of memory, so HearClear ${change}. You can change this in Settings.`, { timeout: 15000 });
+    return true;
+  }
+  showBanner('This device ran out of memory loading the speech model, even the smallest one. Press the microphone to try again, or switch to “Browser speech” in Settings.', { error: true });
+  return false;
 }
 
 async function startConversation() {
@@ -665,28 +758,16 @@ async function startConversation() {
     acceptingAudio = false;
     state.turnId = null;
     updateTurnUI();
-    if (!whisper) {
-      whisper = new WhisperEngine({
-        onProgress: () => {},
-        onReady: () => updateModeChip(),
-        onError: (msg) => console.error(msg),
-      });
-    }
-    whisper.cb.onProgress = onWhisperProgress();
-    setStatus('Loading speech model', { dots: true });
+    if (modelLoading) setStatus('Still loading the speech model, you can start talking in a moment', { dots: true });
     try {
-      await whisper.load(state.settings.model);
+      await ensureWhisper();
     } catch (err) {
       state.starting = false;
       els.mic.classList.remove('busy');
-      els.progress.hidden = true;
       stopConversation();
-      const canFallback = browserSpeechSupported();
-      showBanner(`Couldn't load the on-device speech model (${escapeHtml(err.message)}).${canFallback ? ' <button class="btn small primary" id="use-browser">Use browser speech instead</button>' : ''}`, { error: true });
-      $('#use-browser')?.addEventListener('click', () => { state.settings.engine = 'browser'; save(); syncSettingsForm(); updateModeChip(); updateTurnUI(); hideBanner(); startConversation(); });
+      showModelError(err);
       return;
     }
-    els.progress.hidden = true;
     if (!state.running) { state.starting = false; els.mic.classList.remove('busy'); return; }
     acceptingAudio = true;
   } else {
@@ -805,6 +886,7 @@ function syncSettingsForm() {
   const s = state.settings;
   form.engine.value = s.engine;
   form.model.value = s.model;
+  form.device.value = s.device;
   form.autoTurn.checked = s.autoTurn;
   form.translator.value = s.translator;
   form.autoSpeak.checked = s.autoSpeak;
@@ -831,6 +913,8 @@ form.addEventListener('input', () => {
   const prevModel = s.model;
   s.engine = form.engine.value;
   s.model = form.model.value;
+  const prevDevice = s.device;
+  s.device = form.device.value;
   s.autoTurn = form.autoTurn.checked;
   s.translator = form.translator.value;
   s.autoSpeak = form.autoSpeak.checked;
@@ -841,10 +925,12 @@ form.addEventListener('input', () => {
   updateSettingsOutputs();
   updateModeChip();
   save();
-  if (state.running && (prevEngine !== s.engine || (s.engine === 'whisper' && prevModel !== s.model))) {
+  const modelChanged = s.engine === 'whisper' && (prevEngine !== s.engine || prevModel !== s.model || prevDevice !== s.device);
+  if (state.running && (prevEngine !== s.engine || modelChanged)) {
     stopConversation();
     showBanner('Settings changed. Press the microphone to continue.', { timeout: 5000 });
   }
+  if (modelChanged) ensureWhisper().catch(showModelError);
   if (prevEngine !== s.engine) {
     state.turnId = s.engine === 'browser' ? state.people[0].id : null;
     updateTurnUI();
@@ -881,6 +967,7 @@ $('#export-btn').addEventListener('click', () => {
 $('#clear-btn').addEventListener('click', () => {
   if (state.messages.length && !confirm('Clear the whole conversation?')) return;
   state.messages = [];
+  save();
   skipSpeech();
   state.people.forEach((p) => renderPersonMessages(p.id));
 });
@@ -967,5 +1054,16 @@ renderPeople();
 syncSettingsForm();
 updateModeChip();
 if (!storageGet(TOUR_KEY)) setTimeout(() => wizard.start(), 400);
+navigator.storage?.persist?.().catch(() => {}); // keep the cached model from being evicted
+// A normal refresh/close while loading is not a crash.
+window.addEventListener('pagehide', () => { if (modelLoading) storageRemove(LOAD_FLAG); });
+// Finish translations that were in flight when the page was closed.
+state.messages.filter((m) => targetLangs(m).some((t) => !m.translations[t])).forEach((m) => translateMessage(m));
+if (state.settings.engine === 'whisper') {
+  if (checkCrashGuard()) ensureWhisper().catch(showModelError);
+} else {
+  state.turnId = state.people[0].id;
+  updateTurnUI();
+}
 if (!ttsSupported()) showBanner('This browser cannot play AI voices. Translations will still be shown as text.', { timeout: 8000 });
 window.hearclear = { state }; // handy for debugging
