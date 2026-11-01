@@ -75,42 +75,56 @@ export class WhisperEngine {
 
 export const browserSpeechSupported = () => !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 
+/**
+ * Push-to-talk wrapper around the Web Speech API.
+ * onUpdate(finalText, interimText) fires as words are recognised.
+ */
 export class BrowserSpeechEngine {
-  constructor({ onInterim, onFinal, onError, onSpeechStart }) {
-    this.cb = { onInterim, onFinal, onError, onSpeechStart };
+  constructor({ onUpdate, onError }) {
+    this.cb = { onUpdate, onError };
     this.running = false;
-    this.paused = false;
-    this.lang = 'en-US';
     this.rec = null;
+    this.committed = [];
+    this.sessionFinal = '';
+    this.interim = '';
   }
 
   start(lang) {
     this.lang = lang;
     this.running = true;
-    this.paused = false;
+    this.committed = [];
+    this.sessionFinal = '';
+    this.interim = '';
     this._spawn();
   }
 
-  setLang(lang) {
-    if (lang === this.lang) return;
-    this.lang = lang;
-    if (this.running && !this.paused) this._restart();
+  text() {
+    const finals = [...this.committed, this.sessionFinal].filter(Boolean).join(' ').trim();
+    return finals || this.interim.trim();
   }
 
-  pause() { this.paused = true; this._kill(); }
-  resume() { if (this.running && this.paused) { this.paused = false; this._spawn(); } }
-  stop() { this.running = false; this._kill(); }
+  /** Stop listening and resolve with everything that was said. */
+  finish() {
+    this.running = false;
+    return new Promise((resolve) => {
+      let done = false;
+      const end = () => { if (!done) { done = true; resolve(this.text()); } };
+      if (!this.rec) return end();
+      this._onDone = end;
+      setTimeout(end, 2500); // safety net if the browser never fires 'end'
+      try { this.rec.stop(); } catch { end(); }
+    });
+  }
 
-  _kill() {
+  cancel() {
+    this.running = false;
     if (this.rec) {
       const r = this.rec;
       this.rec = null;
-      r.onend = r.onresult = r.onerror = r.onspeechstart = null;
+      r.onend = r.onresult = r.onerror = null;
       try { r.abort(); } catch {}
     }
   }
-
-  _restart() { this._kill(); this._spawn(); }
 
   _spawn() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -120,29 +134,32 @@ export class BrowserSpeechEngine {
     rec.continuous = true;
     rec.interimResults = true;
     rec.maxAlternatives = 1;
-    const lang = this.lang;
-    rec.onspeechstart = () => this.cb.onSpeechStart?.();
     rec.onresult = (e) => {
-      let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
+      let fin = '', interim = '';
+      for (let i = 0; i < e.results.length; i++) {
         const r = e.results[i];
-        if (r.isFinal) {
-          const text = r[0].transcript.trim();
-          if (text) this.cb.onFinal?.(text, lang);
-        } else interim += r[0].transcript;
+        if (r.isFinal) fin += r[0].transcript + ' ';
+        else interim += r[0].transcript;
       }
-      this.cb.onInterim?.(interim.trim(), lang);
+      this.sessionFinal = fin.replace(/\s+/g, ' ').trim();
+      this.interim = interim.trim();
+      const finals = [...this.committed, this.sessionFinal].filter(Boolean).join(' ');
+      this.cb.onUpdate?.(finals, this.interim);
     };
     rec.onerror = (e) => {
       if (e.error === 'no-speech' || e.error === 'aborted') return;
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') this.running = false;
       this.cb.onError?.(e.error);
     };
     rec.onend = () => {
       if (this.rec !== rec) return;
       this.rec = null;
-      // Browsers end recognition after silence; keep it alive while the conversation runs.
-      if (this.running && !this.paused) setTimeout(() => this._spawn(), 150);
+      if (this.sessionFinal) this.committed.push(this.sessionFinal);
+      else if (!this.running && this.interim) this.committed.push(this.interim);
+      this.sessionFinal = '';
+      this.interim = '';
+      // Browsers stop after a silence; keep listening until the button is pressed again.
+      if (this.running) setTimeout(() => this._spawn(), 100);
+      else this._onDone?.();
     };
     this.rec = rec;
     try { rec.start(); } catch (err) { this.rec = null; this.cb.onError?.(String(err.message || err)); }

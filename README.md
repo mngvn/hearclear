@@ -4,33 +4,27 @@ Live voice translation for face-to-face conversations between people who speak d
 
 **Live app:** https://mngvn.github.io/hearclear/
 
-## What it does
+## How to use it
 
-1. Press the microphone and talk. HearClear starts with **two people** and you can **add up to eight**.
-2. Each person's card has two boxes. **Original** shows their words **live, as they speak**. **Translation** shows the same sentence in the other person's language, also updating live.
-3. It works out **who is speaking** and puts the words in **that person's** card.
-4. It **reads the translation aloud** with an AI voice of the **same gender** as the speaker. The gender is detected from the pitch of the speaker's voice, or you can set it yourself.
+1. Each person has a card. Set their name and the language they **speak**. There are two people to start, and you can add up to eight.
+2. Tap **🎙️ Talk** on your card and speak. Your words appear **live** in the **Original** box, and the translation appears live in the **Translation** box.
+3. Tap the same button again to **save** what you said.
+4. Press **🔊 Play** on the translation so the other person **hears** it, read by an AI voice. With *Auto*, the voice's gender matches yours, judged from the pitch of your voice.
 
 A guided tour opens on the first visit. Reopen it any time with **Guide** in the top bar.
 
-## How speaker detection works
+## Speech recognition
 
-| Mode | How it decides who's talking | Notes |
-| --- | --- | --- |
-| **Auto-detect speakers** (default) | While someone talks, it re-transcribes the unfinished sentence about once a second for the live preview, then does a final pass when they pause. Runs [Whisper](https://github.com/openai/whisper) on your device via [transformers.js](https://github.com/huggingface/transformers.js). For each sentence it detects which of the *participants'* languages is spoken, which picks the person. If several people share a language, it compares voice fingerprints (pitch and spectral features). | The model downloads once (~40–250 MB depending on size) and is cached. Uses WebGPU when available, otherwise WebAssembly. Works in Chrome, Edge, Safari and Firefox. |
-| **Browser speech** (turn-taking) | Uses the browser's Web Speech API in the current person's language, then passes the turn to the next person after each sentence. Voice fingerprints decide between people who share a language. | Fast, nothing to download. Chrome, Edge and Safari only. |
-
-Fixing mistakes:
-
-- **My turn** tells HearClear exactly who is speaking.
-- **⋯ → Move to** moves a message to the right person. HearClear also learns that person's voice from it.
-- **Teach voice** records a 5-second sample. This helps most when two people share a language.
+| Option | Notes |
+| --- | --- |
+| **On-device AI** (default) | Runs [Whisper](https://github.com/openai/whisper) in the browser via [transformers.js](https://github.com/huggingface/transformers.js). It loads automatically when the page opens and is cached after the first download (~40–250 MB depending on size). While you talk, it previews the unfinished sentence about once a second, and it locks in each sentence when you pause. Uses WebGPU on computers and the CPU on phones (less memory). If the tab crashes while loading, it steps down to a lighter setup on its own. |
+| **Browser speech** | The browser's Web Speech API (Chrome, Edge, Safari). The fastest live words and nothing to download, but the audio goes to the browser maker's service. |
 
 ## Translation and voices
 
 - Translation: Google Translate's free web endpoint, with MyMemory as a fallback. Chrome's on-device Translator API is available as an option in Settings.
 - Voices: the browser's built-in speech synthesis. HearClear picks a voice in the target language whose name suggests the right gender. If none exists, it shifts the pitch instead.
-- The microphone pauses while the AI voice talks, so the app doesn't translate itself. If everyone wears headphones, you can turn that off in Settings.
+- Translations play when you press 🔊 Play. To play them automatically after saving, turn that on in Settings.
 
 ## Privacy
 
@@ -50,10 +44,10 @@ The microphone only works on `https://` or `localhost`.
 index.html            page structure (people, controls, settings, tour)
 css/styles.css        styles (light & dark)
 js/app.js             app state, UI, conversation pipeline
-js/audio.js           mic capture, voice activity detection, voiceprints (pitch + MFCC)
-js/speaker.js         speaker matching & gender from pitch
-js/engines.js         Whisper engine wrapper + Web Speech API engine
-js/whisper-worker.js  Whisper in a Web Worker, with language detection limited to the participants' languages
+js/audio.js           mic capture, sentence detection, voice pitch
+js/speaker.js         voice profile & gender from pitch
+js/engines.js         Whisper engine wrapper + push-to-talk Web Speech API engine
+js/whisper-worker.js  Whisper in a Web Worker (live previews, streamed words)
 js/translate.js       translation providers with fallback
 js/tts.js             gender-matched speech synthesis
 js/wizard.js          guided tour

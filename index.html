@@ -44,17 +44,12 @@
 
   <footer class="controls">
     <div class="status-wrap">
-      <div class="meter" aria-hidden="true"><span id="meter-fill"></span></div>
-      <div class="status" id="status" role="status" aria-live="polite">Press the microphone to start the conversation</div>
+      <div class="status" id="status" role="status" aria-live="polite">Tap 🎙️ Talk on your card, speak, then tap it again to save.</div>
       <div class="progress" id="progress" hidden><span id="progress-fill"></span></div>
     </div>
-    <button class="mic" id="mic-btn" type="button" aria-pressed="false" aria-label="Start conversation">
-      <svg class="icon-mic" viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      <svg class="icon-stop" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor"/></svg>
-    </button>
     <div class="side-actions">
-      <button class="btn ghost small" id="skip-btn" hidden title="Stop the voice that is playing">Skip voice</button>
-      <button class="btn ghost small" id="export-btn" title="Download transcript">Save</button>
+      <button class="btn ghost small" id="skip-btn" hidden title="Stop the voice that is playing">Stop voice</button>
+      <button class="btn ghost small" id="export-btn" title="Download transcript">Save transcript</button>
       <button class="btn ghost small" id="clear-btn" title="Clear conversation">Clear</button>
     </div>
   </footer>
@@ -72,15 +67,15 @@
         <label class="radio-card">
           <input type="radio" name="engine" value="whisper" />
           <span>
-            <strong>Auto-detect speakers</strong> <em class="tag">recommended</em><br />
-            <small>Runs Whisper AI on your device. Works out which language is being spoken, and who is speaking, by itself. The model loads automatically when the page opens. It downloads once (about 80&nbsp;MB), is saved on your device, and works in any modern browser.</small>
+            <strong>On-device AI (Whisper)</strong><br />
+            <small>Works in every modern browser and keeps your voice on this device. The model loads automatically when the page opens: about 80&nbsp;MB the first time, then it's saved.</small>
           </span>
         </label>
         <label class="radio-card">
           <input type="radio" name="engine" value="browser" />
           <span>
-            <strong>Browser speech (turn-taking)</strong><br />
-            <small>Uses your browser's speech recognition (best in Chrome, Edge &amp; Safari). Fast, nothing to download. Listens for one person at a time and hands the turn to the next person after each sentence.</small>
+            <strong>Browser speech</strong><br />
+            <small>Uses your browser's speech recognition (Chrome, Edge, Safari). The fastest live words and nothing to download, but your audio goes to the browser maker's service.</small>
           </span>
         </label>
         <label class="row" data-for="whisper">
@@ -99,10 +94,6 @@
             <option value="wasm">CPU: uses the least memory</option>
           </select>
         </label>
-        <label class="row check" data-for="browser">
-          <input type="checkbox" name="autoTurn" />
-          <span>Hand the turn to the next person after each sentence</span>
-        </label>
       </fieldset>
 
       <fieldset>
@@ -117,54 +108,20 @@
           </select>
         </label>
         <label class="row check">
-          <input type="checkbox" name="livePreview" />
-          <span>Show words live while someone is speaking</span>
-        </label>
-        <label class="row check">
           <input type="checkbox" name="autoSpeak" />
-          <span>Read translations aloud with an AI voice</span>
+          <span>Play the translation automatically after saving</span>
         </label>
         <label class="row">
           <span>Voice speed <output id="rate-out"></output></span>
           <input type="range" name="rate" min="0.6" max="1.6" step="0.1" />
         </label>
-        <label class="row check">
-          <input type="checkbox" name="headphones" />
-          <span>Keep listening while the voice plays (only with headphones)</span>
-        </label>
-      </fieldset>
-
-      <fieldset>
-        <legend>Listening</legend>
-        <label class="row">
-          <span>Pause that ends a sentence <output id="pause-out"></output></span>
-          <input type="range" name="pauseMs" min="400" max="2000" step="100" />
-        </label>
-        <label class="row">
-          <span>Microphone sensitivity <output id="sens-out"></output></span>
-          <input type="range" name="sensitivity" min="0" max="100" step="5" />
-        </label>
       </fieldset>
 
       <div class="sheet-foot">
-        <button type="button" class="btn ghost" id="reset-voices">Forget learned voices</button>
+        <span></span>
         <button class="btn primary" value="close">Done</button>
       </div>
     </form>
-  </dialog>
-
-  <!-- Teach voice -->
-  <dialog class="sheet small" id="enroll-dialog" aria-labelledby="enroll-title">
-    <div class="sheet-body">
-      <h2 id="enroll-title">Teach HearClear your voice</h2>
-      <p id="enroll-text"></p>
-      <p class="enroll-phrase" id="enroll-phrase"></p>
-      <div class="enroll-count" id="enroll-count"></div>
-      <div class="sheet-foot">
-        <button type="button" class="btn ghost" id="enroll-cancel">Cancel</button>
-        <button type="button" class="btn primary" id="enroll-go">Start recording</button>
-      </div>
-    </div>
   </dialog>
 
   <!-- Wizard -->
@@ -199,16 +156,11 @@
         <label class="mini">
           <span>AI voice</span>
           <select class="voice">
-            <option value="auto">Auto</option>
+            <option value="auto">Auto (match my voice)</option>
             <option value="female">Female</option>
             <option value="male">Male</option>
           </select>
         </label>
-      </div>
-      <div class="person-actions">
-        <button class="chip turn" type="button" title="Tell HearClear this person is speaking now">🎙️ My turn</button>
-        <button class="chip enroll" type="button" title="Record a short sample so HearClear recognises this voice">Teach voice</button>
-        <span class="voice-info"></span>
       </div>
       <div class="boxes">
         <section class="box orig-box" aria-label="Original">
@@ -219,6 +171,14 @@
           <header class="box-head"><span class="box-title">🌐 Translation</span><span class="box-lang"></span></header>
           <div class="box-list" aria-live="polite"><div class="live" dir="auto" hidden></div></div>
         </section>
+      </div>
+      <div class="talk-row">
+        <button class="talk-btn" type="button" aria-pressed="false">
+          <span class="talk-icon" aria-hidden="true"></span>
+          <span class="talk-label">Talk</span>
+          <span class="talk-time"></span>
+        </button>
+        <span class="voice-info"></span>
       </div>
     </article>
   </template>

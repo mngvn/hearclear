@@ -32,6 +32,21 @@ export class MicCapture {
     this.segSeq = 0; // increments for every new sentence
   }
 
+  /** Start keeping every sample (used for push-to-talk recordings). */
+  beginCapture() { this.capture = []; }
+
+  /** Stop keeping samples and return everything captured since beginCapture(). */
+  endCapture() {
+    const out = concat(this.capture || []);
+    this.capture = null;
+    return out;
+  }
+
+  /** End the current sentence now (e.g. the Talk button was released). */
+  flush() {
+    if (this.inSpeech) this._emit();
+  }
+
   /** Audio of the sentence currently being spoken (for live previews), or null. */
   currentSegment() {
     return this.inSpeech ? concat(this.segFrames) : null;
@@ -108,6 +123,8 @@ export class MicCapture {
     for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
     const rms = Math.sqrt(sum / input.length);
     this.opts.onLevel?.(this.muted ? 0 : Math.min(1, rms * 6));
+
+    if (this.capture && !this.muted) this.capture.push(down);
 
     if (this.recorder) {
       const r = this.recorder;
